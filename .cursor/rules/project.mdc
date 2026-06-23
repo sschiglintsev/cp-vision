@@ -1,0 +1,414 @@
+# Cursor AI Rules
+
+## General Rules
+
+* Следовать существующей архитектуре проекта.
+* Не изменять структуру проекта без явной необходимости.
+* Перед созданием нового файла проверить, можно ли переиспользовать существующий.
+* Не дублировать код.
+* Использовать понятные имена переменных, функций и компонентов.
+* Все новые функции должны иметь понятную ответственность (Single Responsibility Principle).
+* Не писать комментарии для очевидного кода.
+* Предпочитать читаемый код вместо сокращений.
+
+---
+
+## TypeScript Rules
+
+### Strict Mode
+
+Всегда писать код совместимый с:
+
+```json
+{
+  "strict": true
+}
+```
+
+### Запрещено
+
+```ts
+any
+```
+
+```ts
+as any
+```
+
+```ts
+// @ts-ignore
+```
+
+Использовать типы и интерфейсы.
+
+---
+
+## React Rules
+
+Использовать Functional Components.
+
+### Запрещено
+
+```tsx
+class Component
+```
+
+### Использовать
+
+```tsx
+const UserPage = () => {}
+```
+
+---
+
+Не хранить бизнес-логику внутри UI компонентов.
+
+Плохо:
+
+```tsx
+<Button
+  onClick={async () => {
+    const data = await api.getUsers();
+    ...
+  }}
+>
+```
+
+Хорошо:
+
+```tsx
+const { users } = useUsers();
+
+<Button onClick={handleClick}>
+```
+
+---
+
+Структура frontend:
+
+```text
+src/
+
+api/
+components/
+features/
+hooks/
+pages/
+store/
+types/
+utils/
+```
+
+---
+
+Каждая feature должна быть независимой.
+
+Пример:
+
+```text
+features/
+
+auth/
+detection/
+users/
+```
+
+---
+
+Использовать Ant Design.
+
+Не создавать собственные компоненты кнопок, модалок или таблиц без необходимости.
+
+---
+
+## Backend Rules
+
+Использовать архитектуру:
+
+```text
+Controller
+Service
+Repository
+Database
+```
+
+---
+
+Controller отвечает только за:
+
+* получение запроса;
+* валидацию;
+* возврат ответа.
+
+---
+
+Запрещено:
+
+```ts
+const users = await prisma.user.findMany();
+```
+
+внутри Controller.
+
+---
+
+Правильно:
+
+```ts
+Controller
+  -> Service
+      -> Repository
+          -> Database
+```
+
+---
+
+Не размещать SQL внутри контроллеров.
+
+Не размещать бизнес-логику внутри роутов.
+
+---
+
+Все ошибки обрабатывать централизованно через middleware.
+
+---
+
+Использовать DTO для входящих данных.
+
+---
+
+## Database Rules
+
+Использовать PostgreSQL.
+
+Все изменения схемы только через миграции.
+
+Запрещено изменять таблицы вручную.
+
+---
+
+Каждая таблица должна содержать:
+
+```sql
+id
+created_at
+updated_at
+```
+
+если это не противоречит задаче.
+
+---
+
+## Authentication Rules
+
+Использовать JWT.
+
+Access Token:
+
+```text
+15 minutes
+```
+
+Refresh Token:
+
+```text
+30 days
+```
+
+---
+
+Запрещено хранить Access Token в localStorage.
+
+Использовать:
+
+* Memory Storage
+* HttpOnly Cookies
+
+---
+
+## WebSocket Rules
+
+Использовать Socket.IO.
+
+Для realtime задач использовать WebSocket.
+
+Не использовать polling если возможно использовать WebSocket.
+
+---
+
+Все события должны иметь неймспейс:
+
+```text
+detection:start
+detection:frame
+detection:finish
+detection:error
+```
+
+---
+
+## CV Service Rules
+
+Использовать:
+
+* FastAPI
+* OpenCV
+* YOLO
+* NumPy
+
+---
+
+YOLO модель должна загружаться только один раз при запуске приложения.
+
+Запрещено:
+
+```python
+def detect():
+    model = YOLO(...)
+```
+
+---
+
+Правильно:
+
+```python
+model = YOLO(...)
+
+def detect():
+    return model(...)
+```
+
+---
+
+CV Service не должен напрямую работать с Frontend.
+
+Схема взаимодействия:
+
+```text
+Frontend
+    ↕
+Backend
+    ↕
+CV Service
+```
+
+---
+
+## API Rules
+
+Использовать REST API.
+
+Структура:
+
+```text
+/api/v1/
+```
+
+Пример:
+
+```text
+/api/v1/auth/login
+/api/v1/auth/refresh
+/api/v1/detections
+/api/v1/users
+```
+
+---
+
+Все ответы должны иметь единый формат.
+
+Успех:
+
+```json
+{
+  "success": true,
+  "data": {}
+}
+```
+
+Ошибка:
+
+```json
+{
+  "success": false,
+  "message": "Error message"
+}
+```
+
+---
+
+## Logging Rules
+
+Использовать централизованное логирование.
+
+Логировать:
+
+* ошибки;
+* запуск сервисов;
+* подключения WebSocket;
+* вызовы CV Service.
+
+Не логировать:
+
+* пароли;
+* токены;
+* персональные данные.
+
+---
+
+## Testing Rules
+
+Для каждого нового модуля создавать тесты.
+
+Frontend:
+
+```text
+Vitest
+```
+
+Backend:
+
+```text
+Jest
+```
+
+Python:
+
+```text
+Pytest
+```
+
+---
+
+## Docker Rules
+
+Каждый сервис должен запускаться отдельно.
+
+```text
+frontend
+backend
+postgres
+cv-service
+```
+
+Все сервисы должны запускаться через docker-compose.
+
+---
+
+## AI Development Rules
+
+Перед написанием нового кода Cursor обязан:
+
+1. Найти существующую реализацию похожей функциональности.
+2. Переиспользовать существующий код.
+3. Соблюдать архитектуру проекта.
+4. Не создавать дублирующие компоненты.
+5. Не использовать any.
+6. Не писать временные решения без явного указания.
+7. Предлагать масштабируемое решение.
+8. Предлагать production-ready код.
+9. Следовать принципам SOLID.
+10. Следовать принципам Clean Architecture.
+
+```
+```

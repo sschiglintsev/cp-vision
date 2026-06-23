@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String      @map("password_hash")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  detections   Detection[]
+
+  @@map("users")
+}
+
+enum DetectionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Detection {
+  id        String            @id @default(uuid())
+  userId    String?           @map("user_id")
+  fileName  String            @map("file_name")
+  status    DetectionStatus   @default(PENDING)
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+  user      User?             @relation(fields: [userId], references: [id])
+  results   DetectionResult[]
+
+  @@map("detections")
+}
+
+model DetectionResult {
+  id          String    @id @default(uuid())
+  detectionId String    @map("detection_id")
+  className   String    @map("class_name")
+  confidence  Float
+  x           Int
+  y           Int
+  width       Int
+  height      Int
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  detection   Detection @relation(fields: [detectionId], references: [id], onDelete: Cascade)
+
+  @@map("detection_results")
+}

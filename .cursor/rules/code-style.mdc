@@ -1,0 +1,29 @@
+Code Style Rules
+
+TypeScript:
+- strict mode
+- eslint
+- prettier
+
+Python:
+- black
+- isort
+- flake8
+
+Именование:
+
+React:
+UserList.tsx
+UserCard.tsx
+
+Hooks:
+useAuth.ts
+useUsers.ts
+
+Services:
+AuthService.ts
+DetectionService.ts
+
+Repositories:
+UserRepository.ts
+DetectionRepository.ts

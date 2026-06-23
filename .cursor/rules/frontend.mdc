@@ -1,0 +1,23 @@
+React Rules
+
+- React
+- TypeScript
+- Ant Design
+- Vite
+
+Структура:
+
+src/
+api/
+components/
+features/
+hooks/
+pages/
+store/
+types/
+utils/
+
+Запреты:
+- any
+- class components
+- бизнес логика в UI

@@ -1,0 +1,25 @@
+Backend Rules
+
+Architecture:
+
+Controller
+Service
+Repository
+
+REST API
+
+/api/v1/
+
+JWT
+
+Socket.IO
+
+PostgreSQL
+
+Prisma
+
+Запрещено:
+
+- SQL в контроллерах
+- prisma в контроллерах
+- бизнес логика в роутинге

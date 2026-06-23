@@ -1,0 +1,28 @@
+CV Service Rules
+
+Python
+FastAPI
+YOLO
+OpenCV
+
+Структура:
+
+app/
+
+api/
+services/
+models/
+utils/
+
+Запрещено:
+
+- загружать модель на каждый запрос
+- обращаться напрямую к фронту
+
+Разрешено:
+
+Frontend
+↕
+Backend
+↕
+CV Service
