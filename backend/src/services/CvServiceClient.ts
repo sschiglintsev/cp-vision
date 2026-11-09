@@ -4,25 +4,42 @@ import FormData from 'form-data';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { AppError } from '../utils/AppError';
-import { CvDetectionResponse } from '../types/detection';
+import { CvDetectionResult } from '../types/detection';
+
+export interface DetectBufferOptions {
+  filename?: string;
+  mimetype?: string;
+  cameraId?: string | null;
+  sourceType?: string;
+  sourceName?: string | null;
+}
 
 export class CvServiceClient {
-  async detect(file: Express.Multer.File): Promise<CvDetectionResponse> {
-    return this.detectBuffer(file.buffer, file.originalname, file.mimetype);
-  }
-
   async detectBuffer(
     buffer: Buffer,
-    filename = 'frame.jpg',
-    mimetype = 'image/jpeg',
-  ): Promise<CvDetectionResponse> {
+    options: DetectBufferOptions = {},
+  ): Promise<CvDetectionResult> {
+    const {
+      filename = 'frame.jpg',
+      mimetype = 'image/jpeg',
+      cameraId,
+      sourceType,
+      sourceName,
+    } = options;
+
     const formData = new FormData();
     formData.append('file', buffer, { filename, contentType: mimetype });
+
+    // Передаём метаданные источника как дополнительные form-поля
+    // CV Service ожидает необязательные поля camera_id, source_type, source_name
+    if (cameraId) formData.append('camera_id', cameraId);
+    if (sourceType) formData.append('source_type', sourceType);
+    if (sourceName) formData.append('source_name', sourceName);
 
     const url = `${env.cvServiceUrl}/detect`;
 
     try {
-      const response = await axios.post<CvDetectionResponse>(url, formData, {
+      const response = await axios.post<CvDetectionResult>(url, formData, {
         headers: formData.getHeaders(),
         timeout: 10_000,
       });

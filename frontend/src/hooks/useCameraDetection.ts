@@ -1,13 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Socket } from 'socket.io-client';
 
-import type { DetectedObject } from '../types/detection';
+import type { DetectedObject, ImageMetadata, ModelMetadata, SourceMetadata } from '../types/detection';
 
 const FRAME_INTERVAL_MS = 200;
 const STICKY_TTL_MS = 600;
 
+// ---------------------------------------------------------------------------
+// detection:frame payload — соответствует backend DetectionFramePayload
+// ---------------------------------------------------------------------------
+export interface DetectionFramePayload {
+  objects: DetectedObject[];
+  error?: string | null;
+  timestamp?: number;
+  // Метаданные Stage 3+ (опциональны — для обратной совместимости)
+  cameraId?: string | null;
+  source?: SourceMetadata | null;
+  image?: ImageMetadata | null;
+  model?: ModelMetadata | null;
+}
+
 interface UseCameraDetectionReturn {
   objects: DetectedObject[];
+  detectionError: string | null;
   fps: number;
   isActive: boolean;
   start: () => void;
@@ -18,15 +33,16 @@ export const useCameraDetection = (
   socket: Socket | null,
   captureFrame: () => string | null,
   isCameraReady: boolean,
+  cameraId?: string | null,
 ): UseCameraDetectionReturn => {
   const [objects, setObjects] = useState<DetectedObject[]>([]);
+  const [detectionError, setDetectionError] = useState<string | null>(null);
   const [fps, setFps] = useState(0);
   const [isActive, setIsActive] = useState(false);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fpsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stickyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastObjectsRef = useRef<DetectedObject[]>([]);
   const frameCountRef = useRef(0);
 
   const clearStickyTimer = () => {
@@ -44,7 +60,7 @@ export const useCameraDetection = (
     fpsTimerRef.current = null;
     setIsActive(false);
     setObjects([]);
-    lastObjectsRef.current = [];
+    setDetectionError(null);
     frameCountRef.current = 0;
     setFps(0);
   }, []);
@@ -53,34 +69,43 @@ export const useCameraDetection = (
     if (!socket || !isCameraReady) return;
 
     setIsActive(true);
+    setDetectionError(null);
 
     intervalRef.current = setInterval(() => {
       const frame = captureFrame();
       if (!frame) return;
-      socket.emit('camera:frame', frame);
+      // Stage 3: отправляем объект с cameraId для мультикамерной поддержки.
+      // Backend обрабатывает как строку (legacy), так и объект (Stage 3+).
+      socket.emit('camera:frame', { frame, cameraId: cameraId ?? null });
     }, FRAME_INTERVAL_MS);
 
     fpsTimerRef.current = setInterval(() => {
       setFps(frameCountRef.current);
       frameCountRef.current = 0;
     }, 1000);
-  }, [socket, isCameraReady, captureFrame]);
+  }, [socket, isCameraReady, captureFrame, cameraId]);
 
   useEffect(() => {
     if (!socket) return;
 
-    const onFrame = (data: { objects: DetectedObject[] }) => {
+    const onFrame = (data: DetectionFramePayload) => {
+      // Ошибка обработки кадра — показываем пользователю, не маскируем
+      if (data.error) {
+        setDetectionError(data.error);
+        return;
+      }
+
+      // Успешная детекция
+      setDetectionError(null);
       frameCountRef.current += 1;
 
       if (data.objects.length > 0) {
         clearStickyTimer();
-        lastObjectsRef.current = data.objects;
         setObjects(data.objects);
       } else {
-        // Пустой кадр — держим последний результат ещё STICKY_TTL_MS
+        // Пустой кадр — sticky TTL, не сбрасываем сразу
         clearStickyTimer();
         stickyTimerRef.current = setTimeout(() => {
-          lastObjectsRef.current = [];
           setObjects([]);
         }, STICKY_TTL_MS);
       }
@@ -98,5 +123,5 @@ export const useCameraDetection = (
 
   useEffect(() => () => stop(), [stop]);
 
-  return { objects, fps, isActive, start, stop };
+  return { objects, detectionError, fps, isActive, start, stop };
 };

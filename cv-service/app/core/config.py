@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     host: str = "0.0.0.0"
     port: int = 8000
-    yolo_model: str = "yolov8n.pt"
+    yolo_model: str = "yolo11n.pt"
     yolo_confidence: float = 0.4
 
 

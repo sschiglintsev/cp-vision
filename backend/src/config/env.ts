@@ -17,6 +17,7 @@ export const env = {
   jwtSecret: process.env.JWT_SECRET as string,
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET as string,
   cvServiceUrl: process.env.CV_SERVICE_URL as string,
+  corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   jwtAccessExpiresIn: '15m',
   jwtRefreshExpiresIn: '30d',
 } as const;

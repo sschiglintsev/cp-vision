@@ -1,54 +1,108 @@
+"""
+DetectionService — тонкий сервисный слой над DetectionPipeline.
+
+Два метода:
+
+  detect(image_bytes, ...)
+    Принимает bytes (JPEG/PNG). Делегирует в pipeline.run().
+    Используется endpoint POST /detect.
+
+  detect_frame(frame: CameraFrame)
+    Принимает CameraFrame от Camera Provider.
+    Делегирует в pipeline.run_decoded() — без JPEG encode/decode.
+    Используется USB/RTSP Camera Providers.
+
+Singleton `detection_service` создаётся без загрузки модели.
+Движок становится доступен после его регистрации в model_registry (в lifespan).
+"""
+
 import logging
-from io import BytesIO
+from typing import Optional, TYPE_CHECKING
 
-import numpy as np
-from PIL import Image
-from ultralytics import YOLO
+from app.inference.registry import model_registry
+from app.models.detection import CameraSourceType, DetectionResult
+from app.pipeline.decoder import ImageDecoder
+from app.pipeline.detection_pipeline import DetectionPipeline
+from app.pipeline.preprocessor import IdentityPreprocessor
 
-from app.models.detection import DetectedObject, DetectionResponse
-from app.utils.config import settings
+if TYPE_CHECKING:
+    from app.cameras.models import CameraFrame
+    from app.inference.registry import ModelRegistry
 
 logger = logging.getLogger(__name__)
 
 
-class YoloDetectionService:
-    def __init__(self) -> None:
-        logger.info("Loading YOLO model: %s", settings.yolo_model)
-        self._model = YOLO(settings.yolo_model)
-        logger.info("YOLO model loaded successfully")
+class DetectionService:
+    """Сервис обнаружения объектов. Делегирует обработку в DetectionPipeline."""
 
-    def detect(self, image_bytes: bytes) -> DetectionResponse:
-        pil_image = Image.open(BytesIO(image_bytes)).convert("RGB")
-        image_array = np.array(pil_image)
+    def __init__(self, registry: "ModelRegistry") -> None:
+        self._pipeline = DetectionPipeline(
+            decoder=ImageDecoder(),
+            preprocessor=IdentityPreprocessor(),
+            registry=registry,
+        )
 
-        results = self._model(image_array, conf=settings.yolo_confidence, verbose=False)
+    def detect(
+        self,
+        image_bytes: bytes,
+        camera_id: Optional[str] = None,
+        source_type: CameraSourceType = CameraSourceType.UNKNOWN,
+        source_name: Optional[str] = None,
+    ) -> DetectionResult:
+        """Выполнить обнаружение объектов и вернуть универсальный результат.
 
-        objects: list[DetectedObject] = []
+        Делегирует в DetectionPipeline:
+        1. ImageDecoder декодирует изображение один раз.
+        2. IdentityPreprocessor передаёт изображение без изменений.
+        3. YoloEngine выполняет инференс на RGB-массиве.
+        4. YoloPostprocessor конвертирует результаты в DetectedObject.
+        5. Pipeline формирует DetectionResult.
 
-        for result in results:
-            if result.boxes is None:
-                continue
-            for box in result.boxes:
-                xyxy = box.xyxy[0].tolist()
-                x1, y1, x2, y2 = xyxy
-                class_id = int(box.cls[0].item())
-                confidence = float(box.conf[0].item())
-                class_name = self._model.names.get(class_id, str(class_id))
+        Args:
+            image_bytes:  Содержимое изображения в байтах.
+            camera_id:    Идентификатор источника (deviceId из браузера и т.п.).
+            source_type:  Тип источника (browser / usb / rtsp / robot / unknown).
+            source_name:  Человекочитаемое название источника (опционально).
 
-                objects.append(
-                    DetectedObject(
-                        **{
-                            "class": class_name,
-                            "confidence": round(confidence, 4),
-                            "x": int(x1),
-                            "y": int(y1),
-                            "width": int(x2 - x1),
-                            "height": int(y2 - y1),
-                        }
-                    )
-                )
+        Returns:
+            DetectionResult — объекты + метаданные источника, изображения, модели.
 
-        return DetectionResponse(objects=objects)
+        Raises:
+            ImageDecodeError: Если изображение не удалось декодировать.
+            RuntimeError: Если движок не зарегистрирован или не готов.
+        """
+        return self._pipeline.run(
+            image_bytes=image_bytes,
+            camera_id=camera_id,
+            source_type=source_type,
+            source_name=source_name,
+        )
+
+    def detect_frame(self, frame: "CameraFrame") -> DetectionResult:
+        """Выполнить детекцию на кадре от Camera Provider.
+
+        Передаёт DecodedImage напрямую в pipeline.run_decoded().
+        Гарантирует отсутствие JPEG encode/decode для USB и других провайдеров.
+
+        Метаданные (camera_id, source.type, source.name) берутся из frame.source.
+
+        Args:
+            frame: CameraFrame, полученный от BaseCameraProvider.read().
+
+        Returns:
+            DetectionResult — объекты + метаданные источника, изображения, модели.
+
+        Raises:
+            RuntimeError: Если движок не зарегистрирован или не готов.
+        """
+        return self._pipeline.run_decoded(
+            decoded=frame.image,
+            camera_id=frame.camera_id,
+            source_type=frame.source.type,
+            source_name=frame.source.name,
+        )
 
 
-detection_service = YoloDetectionService()
+# Singleton — использует model_registry, который заполняется в lifespan.
+# Загрузки модели при импорте НЕ происходит.
+detection_service = DetectionService(registry=model_registry)

@@ -1,6 +1,7 @@
 # CP Vision — Progress Log
 
-Документ описывает всё, что реализовано в проекте с нуля по состоянию на 23 июня 2026.
+Документ описывает всё, что реализовано в проекте с нуля.  
+Последнее обновление: **7 ноября 2026** (Stage 3 — Universal Detection Result).
 
 ---
 
@@ -127,13 +128,19 @@ cp-vision/
 └── cv-service/
     └── app/
         ├── api/
-        │   └── detect.py           — POST /detect
+        │   ├── detect.py           — POST /detect
+        │   └── health.py           — /health/live, /health/ready, /health
+        ├── core/
+        │   └── config.py           — Settings (pydantic-settings)
+        ├── inference/
+        │   ├── base.py             — BaseInferenceEngine (ABC)
+        │   ├── yolo_engine.py      — YoloEngine(BaseInferenceEngine)
+        │   └── registry.py         — ModelRegistry + singleton
         ├── models/
         │   └── detection.py        — Pydantic схемы
         ├── services/
-        │   └── detection_service.py — YoloDetectionService (модель один раз)
-        └── utils/
-            └── config.py           — Settings (pydantic-settings)
+        │   └── detection_service.py — DetectionService → BaseInferenceEngine
+        └── main.py                 — lifespan с инициализацией engine
 ```
 
 ---
@@ -158,13 +165,16 @@ cp-vision/
 
 ### CV Service
 - YOLOv11n (точнее и быстрее YOLOv8n)
-- Модель загружается один раз при старте
+- Модель загружается один раз в lifespan через `YoloEngine.initialize()` — не при импорте модуля
 - Порог уверенности: 0.4 (настраивается через `YOLO_CONFIDENCE` в `.env`)
 - 80 классов: person, car, cat, dog, bottle, laptop, phone и др.
+- **Inference Engine абстракция** (Stage 2): `BaseInferenceEngine` ABC + `YoloEngine` + `ModelRegistry` + `DetectionService`
+- **Universal Detection Result** (Stage 3): `DetectionResult` с `cameraId`, `source`, `image`, `model`; `camera:frame` передаёт `{frame, cameraId}`; `detection:frame` обогащён метаданными
 
 ### WebSocket (Socket.IO)
 - Аутентификация через токен в handshake
 - Персональные комнаты `user:<id>` для изоляции событий
+- Формат `detection:frame`: `{ objects, error, timestamp }` — ошибка отделена от пустого результата
 
 ---
 
@@ -177,6 +187,7 @@ DATABASE_URL=postgresql://user:password@localhost:5432/cp_vision?schema=public
 JWT_SECRET=...
 JWT_REFRESH_SECRET=...
 CV_SERVICE_URL=http://localhost:8000
+CORS_ORIGIN=http://localhost:5173
 NODE_ENV=development
 ```
 
@@ -272,5 +283,61 @@ YOLO_CONFIDENCE=0.4
 
 ## Исправления
 
-### 7 ноября 2026
+### 7 ноября 2026 — Stage 3: Universal Detection Result
+
+**CV Service:**
+- **`app/models/detection.py`** — добавлены `CameraSourceType` (enum), `SourceMetadata`, `ImageMetadata`, `ModelMetadata`, `DetectionResult`; `DetectedObject` и `DetectionResponse` сохранены
+- **`app/inference/yolo_engine.py`** — `get_model_info()` теперь включает ключ `"id"` (напр. `"yolo11n"`)
+- **`app/services/detection_service.py`** — `detect()` принимает `camera_id`, `source_type`, `source_name`; читает размеры изображения через Pillow; строит полный `DetectionResult`
+- **`app/api/detect.py`** — добавлены опциональные Form-поля `camera_id`, `source_type`, `source_name`; backward compat сохранена (запросы без метаданных работают)
+
+**Backend:**
+- **`src/types/detection.ts`** — добавлены `CameraSourceType`, `SourceMetadataDto`, `ImageMetadataDto`, `ModelMetadataDto`, `CvDetectionResult`
+- **`src/services/CvServiceClient.ts`** — `detectBuffer` принимает `DetectBufferOptions`; передаёт `camera_id`, `source_type` в CV Service; возвращает `CvDetectionResult`
+- **`src/websocket/socketEvents.ts`** — `camera:frame` принимает `string | {frame, cameraId}` (backward compat); `detection:frame` обогащён полями `cameraId`, `source`, `image`, `model`
+
+**Frontend:**
+- **`src/types/detection.ts`** — добавлены `CameraSourceType`, `SourceMetadata`, `ImageMetadata`, `ModelMetadata`, `DetectionResult`
+- **`src/hooks/useCameraDetection.ts`** — принимает `cameraId?: string | null`; `camera:frame` эмитируется как `{frame, cameraId}`; `DetectionFramePayload` расширен опциональными полями
+- **`src/pages/CameraPage.tsx`** — передаёт `activeDeviceId` как `cameraId`
+
+---
+
+### 7 ноября 2026 — Stage 2: Inference Engine Abstraction
+
+**CV Service:**
+- **`app/core/config.py`** — создан `core/` пакет, `Settings` перенесена из `utils/config.py`
+- **`app/inference/base.py`** — `BaseInferenceEngine` ABC: `initialize`, `detect`, `get_model_info`, `is_ready`, `shutdown`; независим от YOLO и любых ML-библиотек
+- **`app/inference/yolo_engine.py`** — `YoloEngine(BaseInferenceEngine)`: инкапсулирует всю YOLO-специфику; модель загружается в `initialize()`, не в `__init__`
+- **`app/inference/registry.py`** — `ModelRegistry` + singleton `model_registry`; хранит активный движок, предоставляет `get_active_engine()`, `is_ready()`
+- **`app/services/detection_service.py`** — `DetectionService` работает через `BaseInferenceEngine`; не зависит от YOLO напрямую; singleton `detection_service = DetectionService(registry=model_registry)`
+- **`app/api/health.py`** — health/live, health/ready, health вынесены в отдельный роутер; readiness проверяет `model_registry.is_ready()`
+- **`app/api/detect.py`** — API-контракт без изменений (POST /detect, тот же формат ответа)
+- **`app/main.py`** — lifespan без import-time загрузки модели; `YoloEngine` импортируется только внутри lifespan; при ошибке инициализации сервис стартует, но `/health/ready` возвращает 503
+- **`app/utils/config.py`** — удалён (контент перенесён в `core/config.py`)
+
+**Устранена проблема Stage 1:** ранее `detection_service = YoloDetectionService()` запускался на уровне модуля при импорте — YOLO загружалась до lifespan, `try/except` не мог поймать ошибку. Теперь загрузка только в lifespan.
+
+---
+
+### 7 ноября 2026 — Stage 1: MVP Stabilization
+
+**Frontend:**
+- **`hooks/useSocket.ts`** — исправлен stale ref: socket теперь возвращается через `useState`, компоненты гарантированно получают реальный instance после коннекта
+- **`hooks/useCameraDetection.ts`** — ошибка детекции отделена от пустого результата: добавлено поле `detectionError: string | null`; при `data.error` показывается Alert, sticky TTL применяется только при успешном ответе
+- **`hooks/useCamera.ts`** — canvas для захвата кадра переиспользуется (`captureCanvasRef`) — один элемент вместо 5 аллокаций/сек
+- **`components/CameraOverlay/CameraOverlay.tsx`** — добавлен независимый `resize` listener, bounding boxes корректно перерисовываются при изменении размера окна
+- **`pages/CameraPage.tsx`** — показывается `<Alert type="error">` при ошибке детекции
+
+**Backend:**
+- **`config/env.ts`** — добавлена переменная `corsOrigin` (читается из `CORS_ORIGIN` или дефолт `http://localhost:5173`)
+- **`app.ts`** — CORS origin вынесен из хардкода в `env.corsOrigin`
+- **`websocket/socketEvents.ts`** — эмитит `{ objects, error, timestamp }`: при успехе `error: null`, при ошибке — строка с причиной; CORS origin из env; ошибка одного пользователя не влияет на остальных
+- **`services/CvServiceClient.ts`** — удалён мёртвый метод `detect(file: Express.Multer.File)`, остался только `detectBuffer`
+
+**CV Service:**
+- **`app/utils/config.py`** — дефолт `yolo_model` исправлен с `"yolov8n.pt"` на `"yolo11n.pt"`
+- **`app/main.py`** — `@app.on_event("startup")` заменён на `@asynccontextmanager lifespan`; добавлены отдельные endpoints: `GET /health/live` (liveness) и `GET /health/ready` (readiness, 503 если модель не загружена); `GET /health` сохранён для обратной совместимости
+
+**Ранее (7 ноября 2026):**
 - **`api/client.ts`** — interceptor теперь не перехватывает 401 от `/auth/refresh`, иначе при истёкшем refresh token возникал бесконечный цикл и спиннер не исчезал

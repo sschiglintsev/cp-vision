@@ -20,7 +20,7 @@ const getColor = (label: string): string => {
 export const CameraOverlay = ({ videoRef, objects }: CameraOverlayProps) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  useEffect(() => {
+  const draw = () => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
     if (!canvas || !video) return;
@@ -28,8 +28,14 @@ export const CameraOverlay = ({ videoRef, objects }: CameraOverlayProps) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    canvas.width = video.videoWidth || video.clientWidth;
-    canvas.height = video.videoHeight || video.clientHeight;
+    const vw = video.videoWidth || video.clientWidth;
+    const vh = video.videoHeight || video.clientHeight;
+
+    // Обновляем размер canvas только при изменении — избегаем лишнего сброса контекста
+    if (canvas.width !== vw || canvas.height !== vh) {
+      canvas.width = vw;
+      canvas.height = vh;
+    }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -58,6 +64,18 @@ export const CameraOverlay = ({ videoRef, objects }: CameraOverlayProps) => {
       ctx.fillStyle = '#fff';
       ctx.fillText(label, x + 4, y - 5);
     }
+  };
+
+  // Перерисовываем при изменении объектов
+  useEffect(() => {
+    draw();
+  }, [objects, videoRef]);
+
+  // Независимый resize listener — перерисовка при изменении размера окна
+  useEffect(() => {
+    const handleResize = () => draw();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, [objects, videoRef]);
 
   return (

@@ -6,3 +6,7 @@ Pillow==11.1.0
 ultralytics==8.4.75
 opencv-python-headless==4.13.0.92
 numpy==2.0.2
+
+# Dev / testing
+pytest>=8.0.0
+httpx>=0.23.0

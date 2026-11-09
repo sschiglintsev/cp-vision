@@ -16,7 +16,8 @@ const CameraPage = () => {
   const navigate = useNavigate();
   const { socket, connected } = useSocket();
   const { videoRef, devices, activeDeviceId, isReady, error, startCamera, stopCamera, captureFrame, switchCamera } = useCamera();
-  const { objects, fps, isActive, start, stop } = useCameraDetection(socket, captureFrame, isReady);
+  // activeDeviceId используется как cameraId для идентификации источника в DetectionResult
+  const { objects, detectionError, fps, isActive, start, stop } = useCameraDetection(socket, captureFrame, isReady, activeDeviceId);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const user = authStore.getUser();
@@ -94,6 +95,10 @@ const CameraPage = () => {
             </Space>
 
             {error && <Alert type="error" message={error} showIcon />}
+
+            {detectionError && (
+              <Alert type="error" message={`Ошибка детекции: ${detectionError}`} showIcon />
+            )}
 
             {!connected && (
               <Alert type="warning" message="WebSocket не подключён — проверьте, что backend запущен" showIcon />

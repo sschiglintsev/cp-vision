@@ -20,6 +20,8 @@ interface UseCameraReturn {
 export const useCamera = (): UseCameraReturn => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Переиспользуемый canvas для захвата кадров — не создаём новый элемент на каждый вызов
+  const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [devices, setDevices] = useState<CameraDevice[]>([]);
   const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -98,9 +100,17 @@ export const useCamera = (): UseCameraReturn => {
     const video = videoRef.current;
     if (!video || !isReady || video.readyState < 2) return null;
 
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Переиспользуем один canvas — создаём только при первом вызове или смене разрешения
+    if (!captureCanvasRef.current) {
+      captureCanvasRef.current = document.createElement('canvas');
+    }
+
+    const canvas = captureCanvasRef.current;
+    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 

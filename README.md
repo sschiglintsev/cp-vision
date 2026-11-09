@@ -1,369 +1,253 @@
 # Computer Vision Platform
 
-запуск
-# Терминал 1
-cd cv-service && source .venv/bin/activate && uvicorn app.main:app --reload --port 8000
-(если что убить процесс lsof -ti :8000 | xargs kill)
+## Быстрый старт
 
-# Терминал 2
+```bash
+# Терминал 1 — CV Service (порт 8000)
+cd cv-service && source .venv/bin/activate
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Если порт занят:
+lsof -ti :8000 | xargs kill
+
+# Терминал 2 — Backend (порт 3000)
 cd backend && npm run dev
 
-# Терминал 3
+# Терминал 3 — Frontend (порт 5173)
 cd frontend && npm run dev
 
-## Project Overview
-
-Проект предназначен для изучения и разработки систем компьютерного зрения на базе YOLO.
-
-Основная цель проекта:
-
-* прием изображений и видеопотока от пользователя;
-* передача данных на CV-сервис;
-* обработка кадров нейросетью;
-* получение координат обнаруженных объектов;
-* отображение результатов в реальном времени на фронтенде;
-* дальнейшее развитие проекта в сторону трекинга объектов, распознавания лиц, аналитики и видеообработки.
-
----
-
-# Technology Stack
-
-## Frontend
-
-* React
-* TypeScript
-* Vite
-* Ant Design
-* React Router
-* Socket.IO Client
-* Axios
-* JWT Authentication
-
-## Backend
-
-* Node.js
-* Express
-* TypeScript
-* PostgreSQL
-* Socket.IO
-* JWT Authentication
-* Prisma ORM (предпочтительно)
-* Docker
-
-## CV Service
-
-* Python 3.12+
-* FastAPI
-* OpenCV
-* Ultralytics YOLO
-* NumPy
-* PyTorch
-
----
-
-# Repository Structure
-
-```text
-root/
-
-├── frontend/
-│   ├── src/
-│   ├── public/
-│   ├── .env
-│   └── package.json
-│
-├── backend/
-│   ├── src/
-│   ├── migrations/
-│   ├── prisma/
-│   ├── .env
-│   └── package.json
-│
-├── cv-service/
-│   ├── app/
-│   ├── models/
-│   ├── uploads/
-│   ├── .env
-│   └── requirements.txt
-│
-├── docker-compose.yml
-├── README.md
-└── .gitignore
+# Для доступа с телефона в локальной сети:
+# cd frontend && npm run dev -- --host
 ```
 
 ---
 
-# System Architecture
+## О проекте
 
-```text
-Frontend
-    |
-    | WebSocket / HTTP
-    |
+Платформа для изучения и разработки систем компьютерного зрения на базе YOLO.
+
+**Что умеет:**
+- Принимать видеопоток с браузерной камеры (ноутбук / смартфон)
+- Передавать кадры на бэкенд через Socket.IO в реальном времени
+- Обрабатывать каждый кадр нейросетью YOLOv11n
+- Возвращать координаты обнаруженных объектов обратно на фронтенд
+- Рисовать bounding boxes поверх видео без задержки
+
+**Что не поддерживается (намеренно):**
+- Загрузка статичных изображений (удалена)
+- RTSP, USB, IP-камеры
+- Docker / Kubernetes
+- Множественные модели
+
+---
+
+## Стек технологий
+
+### Frontend
+- React 18 + TypeScript
+- Vite 6
+- Ant Design 5
+- React Router 7
+- Socket.IO Client 4
+- Axios + JWT (silent refresh)
+
+### Backend
+- Node.js + Express + TypeScript
+- Socket.IO 4
+- PostgreSQL + Prisma ORM
+- JWT (access 15 мин / refresh 30 дней в HttpOnly cookie)
+
+### CV Service
+- Python 3.9+
+- FastAPI + uvicorn
+- Ultralytics YOLOv11n
+- OpenCV, NumPy, Pillow
+
+---
+
+## Архитектура
+
+```
+Browser (getUserMedia)
+  │  base64 JPEG, 200 мс интервал
+  ↓ Socket.IO  camera:frame
+Backend :3000
+  │  multipart/form-data HTTP POST
+  ↓ axios  POST /detect
+CV Service :8000  (YOLOv11n)
+  │  { objects: [...] }
+  ↓ HTTP response
 Backend
-    |
-    | HTTP API
-    |
-CV Service (Python + YOLO)
+  │  { objects, error, timestamp }
+  ↓ Socket.IO  detection:frame
+Browser (Canvas overlay)
 ```
 
-### Processing Flow
-
-1. Пользователь загружает изображение или видео.
-2. Frontend отправляет файл на Backend.
-3. Backend сохраняет задачу.
-4. Backend отправляет запрос в CV Service.
-5. CV Service запускает YOLO.
-6. YOLO возвращает список найденных объектов.
-7. Backend передает результат через WebSocket.
-8. Frontend отображает bounding boxes поверх изображения или видео.
+Frontend не обращается к CV Service напрямую — только через Backend.
 
 ---
 
-# Data Exchange Format
+## Socket.IO события
 
-## Detection Result
+| Событие | Направление | Описание |
+|---|---|---|
+| `camera:frame` | Frontend → Backend | base64 JPEG кадр |
+| `detection:frame` | Backend → Frontend | результат детекции |
+
+### Формат `camera:frame` (Frontend → Backend)
+
+```json
+{ "frame": "data:image/jpeg;base64,...", "cameraId": "abc123-device-id" }
+```
+
+Для обратной совместимости Backend также принимает строку (только `frame` без `cameraId`).
+
+### Формат `detection:frame` (Backend → Frontend)
 
 ```json
 {
-  "frameId": 1,
   "objects": [
-    {
-      "class": "person",
-      "confidence": 0.97,
-      "x": 100,
-      "y": 120,
-      "width": 150,
-      "height": 200
-    }
-  ]
+    { "class": "person", "confidence": 0.97, "x": 100, "y": 120, "width": 150, "height": 200 }
+  ],
+  "error": null,
+  "timestamp": 1731000000000,
+  "cameraId": "abc123-device-id",
+  "source": { "type": "browser", "id": "abc123-device-id", "name": null },
+  "image":  { "width": 1280, "height": 720, "format": "jpeg" },
+  "model":  { "id": "yolo11n", "name": "yolo11n", "type": "object-detection" }
 }
 ```
 
----
-
-# Real-Time Communication
-
-Для передачи результатов использовать Socket.IO.
-
-Frontend подписывается на события:
-
-```text
-detection:start
-detection:frame
-detection:finish
-detection:error
-```
-
-Backend является Socket.IO сервером.
-
-CV Service не работает напрямую с WebSocket клиентами.
-
-Все взаимодействие CV Service → Frontend должно проходить через Backend.
+При ошибке детекции `error` содержит строку, `objects` пустой. При успехе `error` — `null`.  
+Поля `cameraId`, `source`, `image`, `model` добавлены в Stage 3 и являются опциональными для старых клиентов.
 
 ---
 
-# Authentication
+## Переменные окружения
 
-Использовать JWT.
-
-## Access Token
-
-* срок жизни 15 минут
-
-## Refresh Token
-
-* срок жизни 30 дней
-
-Хранение:
-
-* Access Token в памяти приложения
-* Refresh Token в HttpOnly Cookie
-
-Не использовать localStorage для access token.
-
----
-
-# Database
-
-PostgreSQL.
-
-Основные сущности:
-
-## Users
-
-```text
-id
-email
-password_hash
-created_at
-```
-
-## Detections
-
-```text
-id
-user_id
-file_name
-status
-created_at
-```
-
-## DetectionResults
-
-```text
-id
-detection_id
-class_name
-confidence
-x
-y
-width
-height
-```
-
----
-
-# Backend Guidelines
-
-## Architecture
-
-Использовать слои:
-
-```text
-Controller
-Service
-Repository
-Database
-```
-
-Не обращаться к БД напрямую из контроллеров.
-
----
-
-# Frontend Guidelines
-
-Использовать структуру:
-
-```text
-src/
-
-api/
-components/
-features/
-pages/
-hooks/
-store/
-types/
-utils/
-```
-
-Каждая feature должна быть максимально независимой.
-
-Не размещать бизнес-логику внутри UI-компонентов.
-
----
-
-# CV Service Guidelines
-
-Использовать архитектуру:
-
-```text
-app/
-
-api/
-services/
-models/
-utils/
-```
-
-YOLO модели загружаются один раз при старте приложения.
-
-Не загружать модель на каждый запрос.
-
----
-
-# Environment Variables
-
-Каждый сервис обязан иметь собственный .env.
-
-Пример:
-
-## frontend
+### backend/.env
 
 ```env
-VITE_API_URL=
-VITE_WS_URL=
+PORT=3000
+DATABASE_URL=postgresql://user:password@localhost:5432/cp_vision?schema=public
+JWT_SECRET=change-me-access-secret
+JWT_REFRESH_SECRET=change-me-refresh-secret
+CV_SERVICE_URL=http://localhost:8000
+CORS_ORIGIN=http://localhost:5173
 ```
 
-## backend
+### frontend/.env
 
 ```env
-PORT=
-DATABASE_URL=
-JWT_SECRET=
-JWT_REFRESH_SECRET=
-CV_SERVICE_URL=
+VITE_API_URL=http://localhost:3000
+VITE_WS_URL=http://localhost:3000
 ```
 
-## cv-service
+### cv-service/.env
 
 ```env
-YOLO_MODEL=
-HOST=
-PORT=
+HOST=0.0.0.0
+PORT=8000
+YOLO_MODEL=yolo11n.pt
+YOLO_CONFIDENCE=0.4
 ```
 
 ---
 
-# Code Style
+## Структура репозитория
 
-## TypeScript
-
-* strict mode
-* eslint
-* prettier
-
-## Python
-
-* black
-* isort
-* flake8
+```
+cp-vision/
+├── frontend/
+│   └── src/
+│       ├── api/            — authApi, axios client
+│       ├── components/     — AuthInitializer, CameraOverlay, PrivateRoute
+│       ├── features/auth/  — useAuth hook
+│       ├── hooks/          — useCamera, useCameraDetection, useSocket
+│       ├── pages/          — LoginPage, DashboardPage, CameraPage
+│       ├── store/          — authStore (in-memory token)
+│       └── types/          — auth.ts, detection.ts
+│
+├── backend/
+│   ├── prisma/
+│   │   └── schema.prisma
+│   └── src/
+│       ├── config/         — env.ts, database.ts
+│       ├── controllers/    — AuthController
+│       ├── middleware/     — auth, errorHandler, validate
+│       ├── repositories/   — User, Detection, DetectionResult
+│       ├── routes/         — authRoutes
+│       ├── services/       — AuthService, CvServiceClient
+│       ├── websocket/      — socketEvents.ts
+│       └── utils/          — AppError, apiResponse, jwt, logger
+│
+├── cv-service/
+│   └── app/
+│       ├── api/
+│       │   ├── detect.py   — POST /detect (API-контракт без изменений)
+│       │   └── health.py   — /health/live, /health/ready, /health
+│       ├── core/
+│       │   └── config.py   — Settings (pydantic-settings)
+│       ├── inference/
+│       │   ├── base.py     — BaseInferenceEngine (ABC)
+│       │   ├── yolo_engine.py — YoloEngine(BaseInferenceEngine)
+│       │   └── registry.py — ModelRegistry + singleton
+│       ├── models/         — detection.py (Pydantic схемы DetectedObject, DetectionResponse)
+│       ├── services/       — detection_service.py (DetectionService → BaseInferenceEngine)
+│       └── main.py         — FastAPI app, lifespan (инициализация engine)
+│
+├── docs/
+│   └── ARCHITECTURE_AUDIT.md
+├── PROGRESS.md
+└── README.md
+```
 
 ---
 
-# Future Roadmap
+## Inference Engine (CV Service)
 
-## Stage 1
+CV Service построен на абстракции `BaseInferenceEngine`:
 
-* JWT авторизация
-* загрузка изображений
-* YOLO detection
-* отображение bounding boxes
+| Компонент | Ответственность |
+|---|---|
+| `BaseInferenceEngine` | ABC-интерфейс: `initialize`, `detect`, `get_model_info`, `is_ready`, `shutdown` |
+| `YoloEngine` | Реализация для YOLOv11n: загрузка .pt, инференс, конвертация в `DetectedObject` |
+| `ModelRegistry` | Хранит активный движок, предоставляет `get_active_engine()`, `is_ready()` |
+| `DetectionService` | Вызывает движок через `BaseInferenceEngine`, не зависит от YOLO |
 
-## Stage 2
+Модель загружается **один раз** в `lifespan` через `engine.initialize()`. При импорте Python-модулей загрузки не происходит.
 
-* обработка видео
-* WebSocket streaming
-* трекинг объектов
+---
 
-## Stage 3
+## Health endpoints (CV Service)
 
-* face detection
-* face recognition
-* аналитика
+| Endpoint | Описание |
+|---|---|
+| `GET /health` | Liveness — приложение запущено (backward compat) |
+| `GET /health/live` | Liveness probe |
+| `GET /health/ready` | Readiness probe — 503 если движок не готов |
 
-## Stage 4
+---
 
-* RTSP камеры
-* многопоточность
-* GPU ускорение
+## Аутентификация
 
-## Stage 5
+- Регистрация и вход по email + пароль
+- Access token (15 мин) хранится в памяти — не в localStorage
+- Refresh token (30 дней) в HttpOnly cookie
+- Silent refresh при перезагрузке страницы через `AuthInitializer`
+- Axios interceptor обновляет access token при 401, не перехватывает `/auth/refresh`
 
-* кластеризация сервисов
-* Kubernetes
-* масштабирование
+---
 
-```
-```
+## Roadmap
+
+| Приоритет | Задача |
+|---|---|
+| ⬆ | История детекций — сохранение в БД, список сессий |
+| ⬆ | Фильтрация классов (показывать только person / car и т.д.) |
+| ⬆ | Смена модели через UI (yolo11n / yolo11s / yolo11m) |
+| → | Обработка видеофайла (загрузка mp4, покадровая обработка) |
+| → | Статистика за сессию |
+| ↓ | RTSP-камеры |
+| ↓ | Face recognition |
+| ↓ | Docker / Kubernetes |
